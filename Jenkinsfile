@@ -1,3 +1,5 @@
+def OLD_IMAGE = ""
+
 pipeline {
     agent any
 
@@ -5,10 +7,17 @@ pipeline {
         APP_NAME = "angular-demo"
         IMAGE_NAME = "angular-ssr"
         PORT = "4000"
-        OLD_IMAGE = ""
+        HEALTH_URL = "http://localhost:4000"
     }
 
     stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'master', url: 'https://github.com/Lakshmansai1999/angular-ssr.git'
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 script {
@@ -17,9 +26,7 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    sh """
-                    docker build -t ${IMAGE_NAME}:latest .
-                    """
+                    sh "docker build -t ${IMAGE_NAME}:latest ."
                 }
             }
         }
@@ -39,14 +46,34 @@ pipeline {
                 }
             }
         }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    echo "⏳ Waiting for app to start..."
+                    sleep 10
+
+                    sh """
+                    STATUS=\$(curl -o /dev/null -s -w "%{http_code}" ${HEALTH_URL} || true)
+
+                    echo "Health check HTTP status: \$STATUS"
+
+                    if [ "\$STATUS" != "200" ]; then
+                      echo "❌ Health check failed"
+                      exit 1
+                    fi
+                    """
+                }
+            }
+        }
     }
 
     post {
         failure {
-            echo "❌ Deployment failed. Rolling back..."
+            echo "🚨 Deployment unhealthy. Rolling back..."
 
             script {
-                if (OLD_IMAGE) {
+                if (OLD_IMAGE?.trim()) {
                     sh """
                     docker stop ${APP_NAME} || true
                     docker rm ${APP_NAME} || true
@@ -59,13 +86,13 @@ pipeline {
                       ${IMAGE_NAME}:rollback
                     """
                 } else {
-                    echo "⚠ No previous image available"
+                    echo "⚠ No previous image available for rollback"
                 }
             }
         }
 
         success {
-            echo "✅ Deployment successful"
+            echo "✅ App is healthy. Deployment successful!"
         }
     }
 }
