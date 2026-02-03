@@ -1,5 +1,3 @@
-def OLD_IMAGE = ""
-
 pipeline {
     agent any
 
@@ -14,35 +12,44 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git branch: 'master', url: 'https://github.com/Lakshmansai1999/angular-ssr.git'
+                git branch: 'master',
+                    url: 'https://github.com/Lakshmansai1999/angular-ssr.git'
+            }
+        }
+
+        stage('Backup Previous Image') {
+            steps {
+                script {
+                    sh '''
+                    if docker image inspect angular-ssr:latest > /dev/null 2>&1; then
+                      echo "Backing up previous image"
+                      docker tag angular-ssr:latest angular-ssr:previous
+                    else
+                      echo "No previous image to back up"
+                    fi
+                    '''
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    OLD_IMAGE = sh(
-                        script: "docker images -q ${IMAGE_NAME}:latest || true",
-                        returnStdout: true
-                    ).trim()
-
-                    sh "docker build -t ${IMAGE_NAME}:latest ."
-                }
+                sh 'docker build -t angular-ssr:latest .'
             }
         }
 
         stage('Deploy (with retry)') {
             steps {
                 retry(2) {
-                    sh """
-                    docker stop ${APP_NAME} || true
-                    docker rm ${APP_NAME} || true
+                    sh '''
+                    docker stop angular-demo || true
+                    docker rm angular-demo || true
 
                     docker run -d \
-                      -p ${PORT}:${PORT} \
-                      --name ${APP_NAME} \
-                      ${IMAGE_NAME}:latest
-                    """
+                      -p 4000:4000 \
+                      --name angular-demo \
+                      angular-ssr:latest
+                    '''
                 }
             }
         }
@@ -50,19 +57,24 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
-                    echo "⏳ Waiting for app to start..."
-                    sleep 10
+                    sh '''
+                    echo "⏳ Waiting for app to become healthy..."
 
-                    sh """
-                    STATUS=\$(curl -o /dev/null -s -w "%{http_code}" ${HEALTH_URL} || true)
+                    for i in $(seq 1 10); do
+                      STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://localhost:4000 || true)
+                      echo "Attempt $i → HTTP $STATUS"
 
-                    echo "Health check HTTP status: \$STATUS"
+                      if [ "$STATUS" = "200" ]; then
+                        echo "✅ App is healthy"
+                        exit 0
+                      fi
 
-                    if [ "\$STATUS" != "200" ]; then
-                      echo "❌ Health check failed"
-                      exit 1
-                    fi
-                    """
+                      sleep 3
+                    done
+
+                    echo "❌ Health check failed"
+                    exit 1
+                    '''
                 }
             }
         }
@@ -72,27 +84,23 @@ pipeline {
         failure {
             echo "🚨 Deployment unhealthy. Rolling back..."
 
-            script {
-                if (OLD_IMAGE?.trim()) {
-                    sh """
-                    docker stop ${APP_NAME} || true
-                    docker rm ${APP_NAME} || true
+            sh '''
+            docker stop angular-demo || true
+            docker rm angular-demo || true
 
-                    docker tag ${OLD_IMAGE} ${IMAGE_NAME}:rollback
-
-                    docker run -d \
-                      -p ${PORT}:${PORT} \
-                      --name ${APP_NAME} \
-                      ${IMAGE_NAME}:rollback
-                    """
-                } else {
-                    echo "⚠ No previous image available for rollback"
-                }
-            }
+            if docker image inspect angular-ssr:previous > /dev/null 2>&1; then
+              docker run -d \
+                -p 4000:4000 \
+                --name angular-demo \
+                angular-ssr:previous
+            else
+              echo "⚠ No previous image available for rollback"
+            fi
+            '''
         }
 
         success {
-            echo "✅ App is healthy. Deployment successful!"
+            echo "✅ Deployment successful and healthy"
         }
     }
 }
