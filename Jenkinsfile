@@ -9,13 +9,6 @@ pipeline {
     }
 
     stages {
-
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/Lakshmansai1999/angular-ssr.git'
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 script {
