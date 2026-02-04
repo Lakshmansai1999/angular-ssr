@@ -4,12 +4,11 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
-RUN npm install -g @angular/cli
 
 COPY . .
 
-COPY entrypoint-dev.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN npm run build
 
 EXPOSE 4000
-ENTRYPOINT ["/entrypoint.sh"]
+
+CMD ["node", "dist/angular-demo/server/server.mjs"]
